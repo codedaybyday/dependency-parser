@@ -26,24 +26,27 @@ struct DependencyNode {
 
 impl Params {
     fn new() -> Params {
-        let mut last_key = String::from(""); // 记录上次解析出来的key
+        let args: Vec<String> = env::args().collect();
+        let mut last_key = None; // 记录上次解析出来的key
         let mut params_map: HashMap<String, String> = HashMap::new();
-        for val in env::args() {
-            // !args从外面传过来就不能迭代
-            let mut val1 = val.clone(); // 复制一份，可能需要优化？
-                                        // --dir /usr/your/path
-            if val1.starts_with("--") {
+        for val in args.iter() {
+            // !args从外面传过来就不能迭代: 原因是new(args())中args()返回是个临时值，执行完成就被销毁了，需要先保存一下
+            // let mut val1 = val.clone(); // 复制一份，可能需要优化？
+            // --dir /usr/your/path
+            if val.starts_with("--") {
                 // 提取key 如dir
-                last_key = val1.split_off(2);
-            } else if (!last_key.is_empty()) {
+                // last_key = val1.split_off(2);
+                last_key = Some(val.trim_start_matches("--").to_string());
+            } else if let Some(key) = &last_key {
                 // 是值 放进map中
-                params_map.insert(last_key.clone(), val1);
+                params_map.insert(key.clone(), val.clone());
+                last_key = None;
             }
         }
 
         Params {
-            dir: params_map.get(&String::from("dir")).unwrap().clone(), // 通过clone获取一个新的所有权
-            output: params_map.get(&String::from("output")).unwrap().clone(),
+            dir: params_map.get("dir").cloned().unwrap(), // 通过clone获取一个新的所有权
+            output: params_map.get("output").cloned().unwrap(),
         }
     }
 }
@@ -51,8 +54,8 @@ impl Params {
 // {
 //     dir： "/xxx",
 //     dependency: {
-//         a: "",
-//         b: ""
+//         a: "1.0,0",
+//         b: "2.0.0"
 //     }
 // }
 fn traversal_deps(
@@ -67,15 +70,16 @@ fn traversal_deps(
         return Ok(());
     }
     let mut fs = File::open(package_json_path)?;
-    let mut package_json_content = String::from("");
+    let mut package_json_content = String::new();
     let mut dependency_node = DependencyNode {
         dir: String::from(package_path.to_str().unwrap()),
         dependencies: HashMap::new(),
     };
 
-    fs.read_to_string(&mut package_json_content);
+    fs.read_to_string(&mut package_json_content)?;
 
-    let package_json: PackageJSON = serde_json::from_str(package_json_content.as_str()).unwrap();
+    let package_json: PackageJSON = serde_json::from_str(package_json_content.as_str())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?; // 通过map_err将错误映射成更友好的形式
 
     if let Some(Value::Object(dependencies)) = &package_json.dependencies {
         for (key, val) in dependencies {
@@ -89,18 +93,8 @@ fn traversal_deps(
             println!("next_package_json_path:{:?}", next_package_path);
             traversal_deps(&next_package_path, deps_tree)?;
         }
-        deps_tree.append(&mut vec![dependency_node]);
+        deps_tree.push(dependency_node);
     }
-    // !循环一定需要所有权?
-    // for map in package_json.dependencies.as_object() {
-    //     for (key, val) in map {
-    //         println!("key:{}, val:{}", key, val);
-    //         // 继续遍历node_modules中的依赖
-    //         let next_package_path = Path::new(package_path).join("node_modules").join(key);
-    //         println!("next_package_json_path:{:?}", next_package_path);
-    //         traversal_deps(&next_package_path);
-    //     }
-    // }
 
     Ok(())
 }
