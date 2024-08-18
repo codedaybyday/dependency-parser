@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::{env, io};
+use std::{env, error::Error, io};
 
 struct Params {
     dir: String,
@@ -25,7 +25,7 @@ struct DependencyNode {
 }
 
 impl Params {
-    fn new() -> Params {
+    fn new() -> Result<Params, String> {
         let args: Vec<String> = env::args().collect();
         let mut last_key = None; // 记录上次解析出来的key
         let mut params_map: HashMap<String, String> = HashMap::new();
@@ -44,10 +44,17 @@ impl Params {
             }
         }
 
-        Params {
-            dir: params_map.get("dir").cloned().unwrap(), // 通过clone获取一个新的所有权
-            output: params_map.get("output").cloned().unwrap(),
+        let dir = params_map.get("dir").cloned().unwrap();
+        let output = params_map.get("output").cloned().unwrap();
+
+        if dir.is_empty() || output.is_empty() {
+            return Err(String::from("Miss params: --dir or --output must input"));
         }
+
+        Ok(Params {
+            dir, // 通过clone获取一个新的所有权
+            output,
+        })
     }
 }
 // 解析结果
@@ -99,19 +106,17 @@ fn traversal_deps(
     Ok(())
 }
 
-fn main() -> Result<(), io::Error> {
-    let params = Params::new();
+fn main() -> Result<(), Box<dyn Error>> {
+    let params = Params::new().map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?; // 将错误进行转换
 
-    if params.dir.is_empty() || params.output.is_empty() {
-        println!("Please input your params: --dir or --output is invalid");
-        return Ok(());
-    }
+    // if params.dir.is_empty() || params.output.is_empty() {
+    //     println!("Please input your params: --dir or --output is invalid");
+    //     return Ok(());
+    // }
     println!("params: {}", params.dir);
     let package_path = Path::new(params.dir.as_str());
     let mut deps_tree: Vec<DependencyNode> = vec![];
     traversal_deps(&package_path, &mut deps_tree)?;
-
-    // println!("deps_tree:{:?}", serde_json::to_string(&deps_tree));
 
     let output_path = Path::new(&params.output);
     let mut fs = File::create(output_path)?;
